@@ -120,3 +120,7 @@ ws://localhost     lib/server.js       lib/bridge.js       substrate.office.com
 - **Anti-detection:** `--disable-blink-features=AutomationControlled`, `ignoreDefaultArgs: ['--enable-automation']`, real Chrome user-agent
 - Profile directory `./profile/` persists cookies/storage between runs
 - `debug.cmd` always launches visible browser for interactive sign-in
+
+## Credits
+
+Inspired by [m365-copilot-openai-proxy](https://github.com/kuchris/m365-copilot-openai-proxy) by [@kuchris](https://github.com/kuchris) — a Python proxy that exposes M365 Copilot as an OpenAI-compatible HTTP API using `substrate.office.com`.
