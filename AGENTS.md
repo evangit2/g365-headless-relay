@@ -2,7 +2,7 @@
 
 ## Project
 
-M365 Copilot Headless Relay — Node.js off-screen Chromium bridge that wraps the M365 Copilot WebSocket (substrate.office.com) as a local `ws://127.0.0.1:8765` relay. No access tokens are extracted or cached — the browser's authenticated session handles all auth.
+g365-headless-relay — Node.js off-screen Chromium bridge that wraps the M365 Copilot WebSocket (substrate.office.com) as a local `ws://127.0.0.1:8765` relay. No access tokens are extracted or cached — the browser's authenticated session handles all auth.
 
 ## Commands
 
@@ -44,14 +44,14 @@ ws://localhost     lib/server.js       lib/bridge.js       substrate.office.com
                     ├─ launchPersistentContext(profile/)  ← headed always
                     ├─ inject lib/bridge.js via addInitScript
                     ├─ one page per client connection
-                    └─ prime page for session keepalive
+                    └─ pages open on demand (no priming)
 ```
 
 ### Files
 
 | File | Role |
 |------|------|
-| `index.js` | CLI parsing, browser launch, server orchestration, keepalive refresh |
+| `index.js` | CLI parsing, browser launch, server orchestration. No token management. |
 | `lib/browser.js` | Launches Playwright Chromium with persistent profile. Headed always — off-screen positioning for hidden mode. |
 | `lib/bridge.js` | Injected page script. Intercepts page WebSocket constructor to capture substrate URL template. Opens substrate WS per chat, sends SignalR invokes, queues responses for poll. |
 | `lib/server.js` | External WebSocket server. One page per client connection. Injects bridge, polls for deltas, forwards to client. |
@@ -67,8 +67,17 @@ ws://localhost     lib/server.js       lib/bridge.js       substrate.office.com
   - `type:3` → Completion (turn done, WS closed)
   - `type:6` → Ping (ignored)
 - The `tone` parameter in the chat invoke controls model behavior:
-  - `"ThinkDeep"` — deeper reasoning (gpt-5.5-think-deeper)
-  - `"Balanced"` — fast, concise (gpt-5.5-quick)
+  - `"Gpt_5_5_Reasoning"` — deeper reasoning (gpt-5.5-think-deeper)
+  - `"Gpt_5_5_Chat"` — fast, concise (gpt-5.5-quick)
+
+### Invoke payload details
+
+The `buildChatInvoke` function in `lib/bridge.js` constructs a type:4 invoke matching the real M365 Copilot page format:
+- `optionsSets`: 32 enterprise feature flags (at_mention_plugins_enable, enterprise_flux_*, code_interpreter_*, etc.)
+- `clientInfo`: includes `ProductCategory: "Chat"`, `productEntryPoint: "ChatPanel"`
+- `message`: user text, entityAnnotationTypes, locationInfo, locale
+- `plugins`: `[{Id: "BingWebSearch", Source: "BuiltIn"}]`
+- `streamingMode`: `"ConciseWithPadding"`
 
 ## Client Protocol (connect to ws://127.0.0.1:8765)
 

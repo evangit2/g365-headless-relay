@@ -1,32 +1,28 @@
-# M365 Copilot Headless Relay
+# g365-headless-relay
 
-Node.js off-screen Chromium bridge that exposes Microsoft 365 Copilot chat through a local WebSocket server. **No keys are extracted or cached** — the browser's authenticated session handles everything.
+Node.js off-screen Chromium bridge that wraps the M365 Copilot WebSocket (`substrate.office.com`) as a local `ws://127.0.0.1:8765` relay. No access tokens are extracted or cached — the browser's authenticated session handles all auth.
 
 ## How it works
 
 1. Launches Chromium with a persistent profile (`./profile/`) — always headed mode, off-screen when hidden
-2. Opens the M365 Copilot chat page, injects a bridge script that intercepts the page's own WebSocket connections
-3. Starts a local WebSocket server at `ws://127.0.0.1:8765`
-4. When a client sends a chat message, the bridge opens a substrate WebSocket from inside the browser page, sends the message, and streams back responses
-5. No access tokens are ever extracted or stored — the browser session IS the auth
+2. When a WebSocket client connects, opens a page at `m365.cloud.microsoft/chat` and injects a bridge script
+3. The bridge intercepts the page's own substrate WebSocket URL template
+4. Incoming chat messages trigger the bridge to open its own substrate WS from inside the page
+5. Responses are streamed back to the client in real time
 
 ## Quick start
 
 ```
 npm install
-
-:: First time — sign in interactively (browser opens visibly)
-debug.cmd
-
-:: Then run off-screen
-start.cmd
+debug.cmd       # first time — sign in (visible browser)
+start.cmd       # off-screen relay
 ```
 
 ## Commands
 
 ```
 node index.js --headless        Off-screen relay (use start.cmd)
-node index.js --no-headless     Visible browser relay (use debug.cmd for login)
+node index.js --no-headless     Visible browser (use debug.cmd for login)
 node index.js --port 9000       Custom relay port
 node index.js --interval 30     Session keepalive every 30 min (default: 50)
 ```
@@ -42,7 +38,7 @@ Connect to `ws://127.0.0.1:8765`
 → {"type":"chat","text":"Hello"}
 ← {"type":"delta","text":"Hel"}
 ← {"type":"delta","text":"lo"}
-← {"type":"message","text":"Hello world...","conversationId":"..."}
+← {"type":"message","text":"Hello...","conversationId":"..."}
 ← {"type":"done","conversationId":"..."}
 ```
 
@@ -53,7 +49,7 @@ Connect to `ws://127.0.0.1:8765`
 | `ping` | → | Keepalive |
 | `ready` | ← | Session created |
 | `delta` | ← | Streaming text chunk |
-| `message` | ← | Full bot response |
+| `message` | ← | Full bot response with conversationId |
 | `done` | ← | Turn complete |
 | `sent` | ← | Message acknowledged |
 | `error` | ← | Error details |
@@ -61,8 +57,10 @@ Connect to `ws://127.0.0.1:8765`
 
 ## Models
 
-- `gpt-5.5-think-deeper` — tone: "ThinkDeep" (deeper reasoning)
-- `gpt-5.5-quick` — tone: "Balanced" (fast, concise)
+| Model ID | Substrate Tone | Behavior |
+|----------|---------------|----------|
+| `gpt-5.5-think-deeper` | `Gpt_5_5_Reasoning` | Deeper reasoning |
+| `gpt-5.5-quick` | `Gpt_5_5_Chat` | Fast, concise |
 
 ## Architecture
 
@@ -78,23 +76,47 @@ ws://localhost     lib/server.js       lib/bridge.js       substrate.office.com
                      setInterval 200ms
 ```
 
-## Files
+```
+                    Browser (Playwright)
+                    ──────────────────
+                    lib/browser.js
+                    │
+                    ├─ launchPersistentContext(profile/)  ← headed always
+                    ├─ inject lib/bridge.js via addInitScript
+                    ├─ one page per client connection
+                    └─ no priming — pages open on demand
+```
+
+### Files
 
 | File | Role |
 |------|------|
-| `index.js` | CLI, launches browser, starts server |
-| `lib/browser.js` | Playwright Chromium launcher (headed, off-screen mode) |
-| `lib/bridge.js` | Injected page script — intercepts substrate WS, sends/receives chat |
-| `lib/server.js` | WebSocket relay — one page per client, polls bridge for responses |
+| `index.js` | CLI parsing, browser launch, server orchestration |
+| `lib/browser.js` | Playwright Chromium launcher — headed always, off-screen positioning for hidden mode |
+| `lib/bridge.js` | Injected page script — intercepts page WebSocket constructor, opens substrate WS per chat, queues responses |
+| `lib/server.js` | External WebSocket server — one page per client, injects bridge, polls for deltas every 200ms |
 | `start.cmd` | Off-screen relay |
 | `debug.cmd` | Visible browser for interactive login |
 
-## Key behaviors
+## Substrate Protocol (substrate.office.com)
 
-- **No keys stored** — the access token never leaves the browser
-- **Browser always headed** — off-screen positioning for hidden mode, never true headless
-- **Bridge script** injected via `page.addInitScript` runs before any page JS
-- **Auto-priming** — clicks input and types space if substrate WS not detected within 15s
-- **Session keepalive** — prime page refreshed every 50 minutes to prevent session expiry
+- **Separator:** `\x1e` (ASCII 0x1E)
+- **Handshake:** `{"protocol":"json","version":1}\x1e`
+- **Chat invoke (type:4):** Contains `tone` (model), `optionsSets` (enterprise features), `message.text`, `clientInfo`, `isStartOfSession`
+- **Response types:**
+  - `type:1 target:update` → `writeAtCursor` deltas (streaming) or `messages` (full bot message)
+  - `type:2` → `item.messages[]` (full conversation with bot response)
+  - `type:3` → Completion (turn done)
+  - `type:6` → Ping (ignored)
+
+## Key Behaviors
+
+- **No token extraction** — the access token stays in the browser; bridge.js uses the page's own substrate WS URL template
+- **Browser always headed** — off-screen positioning (`--window-position=-32000,-32000`) for hidden mode. True headless breaks M365 OAuth/cookie flows.
 - **One page per client** — each WS connection gets its own browser tab with independent conversation
-- **Anti-detection** — `--disable-blink-features=AutomationControlled`, real user-agent, no automation flag
+- **Bridge injected via `addInitScript`** — runs before any page JavaScript, intercepts `window.WebSocket` constructor
+- **Auto-priming** — if the page loads but the substrate WS doesn't open within 15s, clicks chat input and types a space
+- **Poll interval: 200ms** — `setInterval` calling `__m365Poll()` to drain the response queue
+- **Anti-detection:** `--disable-blink-features=AutomationControlled`, `ignoreDefaultArgs: ['--enable-automation']`, real Chrome user-agent
+- Profile directory `./profile/` persists cookies/storage between runs
+- `debug.cmd` always launches visible browser for interactive sign-in
