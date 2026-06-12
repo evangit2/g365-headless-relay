@@ -1,6 +1,7 @@
 const path = require('path');
 const { launchPersistentBrowser, DEFAULT_PROFILE } = require('./lib/browser');
 const { createServer } = require('./lib/server');
+const { startUiServer } = require('./lib/ui-server');
 
 const DEFAULT_PORT = 8765;
 const DEFAULT_INTERVAL_MINUTES = 50;
@@ -8,17 +9,19 @@ const DEFAULT_INTERVAL_MINUTES = 50;
 function printHelp() {
   console.log([
     '',
-    'M365 Copilot Relay',
+    'G365 M365 Copilot Relay — GPT 5.5 Think Deeper Edition',
     '',
-    '  node index.js --headless       Off-screen relay (use start.cmd)',
-    '  node index.js --no-headless    Visible browser (use debug.cmd for login)',
+    '  node index.js --headless       Off-screen relay (default)',
+    '  node index.js --no-headless    Visible browser for login',
     '',
     'Options:',
-    '  --port <n>         Relay port (default: ' + DEFAULT_PORT + ')',
+    '  --port <n>         Relay WS port (default: ' + DEFAULT_PORT + ')',
+    '  --ui-port <n>      Chat UI HTTP port (default: 3000)',
     '  --profile <dir>    Browser profile dir (default: ./profile)',
     '  --headless          Run off-screen (hidden window)',
     '  --no-headless       Show browser window for interactive login',
     '  --interval <min>    Session keepalive refresh (default: ' + DEFAULT_INTERVAL_MINUTES + ')',
+    '  --no-ui             Don\'t start the chat UI server',
     '',
   ].join('\n'));
 }
@@ -27,17 +30,21 @@ function parseArgs(argv) {
   const a = {
     profile: DEFAULT_PROFILE,
     relayPort: DEFAULT_PORT,
+    uiPort: 3000,
     headless: true,
     interval: DEFAULT_INTERVAL_MINUTES,
+    noUi: false,
     help: false,
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--port': a.relayPort = parseInt(argv[++i]) || DEFAULT_PORT; break;
+      case '--ui-port': a.uiPort = parseInt(argv[++i]) || 3000; break;
       case '--profile': a.profile = argv[++i]; break;
       case '--headless': a.headless = true; break;
       case '--no-headless': a.headless = false; break;
       case '--interval': a.interval = parseInt(argv[++i]) || DEFAULT_INTERVAL_MINUTES; break;
+      case '--no-ui': a.noUi = true; break;
       case '--help': case '-h': a.help = true; break;
     }
   }
@@ -48,7 +55,10 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) { printHelp(); return; }
 
-  console.log('M365 Copilot Relay');
+  console.log('╔═══════════════════════════════════════╗');
+  console.log('║  G365 Copilot Relay                   ║');
+  console.log('║  Default: GPT 5.5 Think Deeper        ║');
+  console.log('╚═══════════════════════════════════════╝\n');
   console.log('Profile: ' + args.profile);
   console.log('Mode: ' + (args.headless ? 'off-screen' : 'visible'));
   console.log('');
@@ -56,16 +66,21 @@ async function main() {
   const ctx = await launchPersistentBrowser(args.profile, args.headless);
   args.ctx = ctx;
 
-  const wss = createServer(args);
+  const { wss, drain } = createServer(args);
+
+  if (!args.noUi) {
+    await startUiServer(args.uiPort);
+  }
 
   process.on('SIGINT', function() {
     console.log('\nShutting down...');
+    drain();
     wss.close();
     process.exit(0);
   });
 
-  console.log('Relay: ws://127.0.0.1:' + args.relayPort);
-  console.log('Waiting for WebSocket connections...\n');
+  console.log('Relay WS: ws://127.0.0.1:' + args.relayPort);
+  console.log('Waiting for connections...\n');
 }
 
 if (require.main === module) {
