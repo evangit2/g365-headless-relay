@@ -494,6 +494,25 @@
       from { transform: translateX(100%); opacity: 0; }
       to { transform: translateX(0); opacity: 1; }
     }
+
+    /* Re-auth button */
+    .reauth-btn {
+      background: var(--error);
+      color: white;
+      border: none;
+      border-radius: var(--radius-sm);
+      padding: 6px 14px;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+    }
+    .reauth-btn:hover { background: #da3633; }
+    .reauth-btn.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -509,6 +528,7 @@
       <div class="status-dot" id="status-dot"></div>
       <span id="status-text">Initializing...</span>
     </div>
+    <button class="reauth-btn hidden" id="reauth-btn" title="Re-authenticate M365">🔐 Re-auth</button>
   </div>
 
   <div class="main">
@@ -580,6 +600,7 @@
       debugPanel: document.getElementById('debug-panel'),
       btnReconnect: document.getElementById('btn-reconnect'),
       btnClear: document.getElementById('btn-clear'),
+      reauthBtn: document.getElementById('reauth-btn'),
     };
 
     // Debug logging
@@ -849,12 +870,13 @@
 
           case 'error':
             debug(`Error: ${msg.message}${msg.code ? ' (' + msg.code + ')' : ''}`, 'err');
-            if (msg.code === 'AUTH_REQUIRED') {
-              setStatus('error', 'Auth Required');
+            if (msg.code === 'AUTH_REQUIRED' || msg.code === 'TIMEOUT') {
+              setStatus('error', msg.code === 'AUTH_REQUIRED' ? 'Auth Required' : 'Session Expired');
               els.input.placeholder = 'Sign in to M365 required...';
               els.input.disabled = true;
               els.sendBtn.disabled = true;
-              showToast('M365 sign-in required. Open VNC to authenticate.');
+              if (els.reauthBtn) els.reauthBtn.classList.remove('hidden');
+              showToast('M365 sign-in required. Click 🔐 Re-auth to authenticate.');
             } else {
               showToast(msg.message);
             }
@@ -940,6 +962,28 @@
       ws = null;
       connect();
     });
+
+    // Re-auth button handler
+    if (els.reauthBtn) {
+      els.reauthBtn.addEventListener('click', () => {
+        debug('Re-auth button clicked — opening /reauth');
+        window.open('/reauth', '_blank', 'width=640,height=600,popup=yes');
+      });
+
+      // Listen for auth-check message from reauth popup
+      window.addEventListener('message', (e) => {
+        if (e.data === 'auth-check' || e.data === 'auth-done') {
+          debug('Auth check triggered from popup');
+          showToast('Auth may be ready — reconnecting...');
+          reconnectAttempts = 0;
+          if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+          if (ws) { try { ws.close(); } catch(e) {} }
+          ws = null;
+          connect();
+          if (els.reauthBtn) els.reauthBtn.classList.add('hidden');
+        }
+      });
+    }
 
     els.btnClear.addEventListener('click', () => {
       els.debugBody.innerHTML = '';

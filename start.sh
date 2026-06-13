@@ -49,7 +49,7 @@ fi
 # Start the relay
 echo "Starting relay..."
 DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" \
-    > "$LOG_DIR/relay.log" 2>&1 &
+    > "$LOG_DIR/relay.log" 2>> "$LOG_DIR/relay.log" &
 RELAY_PID=$!
 echo "Relay PID: $RELAY_PID"
 
@@ -57,5 +57,29 @@ echo ""
 echo "Relay WS:    ws://127.0.0.1:$RELAY_PORT"
 echo "Chat UI:     http://127.0.0.1:$UI_PORT"
 echo "VNC remote:  http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
+echo ""
+
+# Quick auth check after a few seconds
+sleep 3
+echo ""
+echo "Checking auth status (wait ~10s)..."
+if command -v node >/dev/null 2>&1; then
+    # Try running auth-check.js if node_modules exist
+    if [[ -d "$SCRIPT_DIR/node_modules" ]]; then
+        (sleep 5 && node "$SCRIPT_DIR/tools/auth-check.js" --json > /tmp/auth_check_result.json 2>/dev/null) &
+        (sleep 12 && {
+            if [[ -f /tmp/auth_check_result.json ]]; then
+                if grep -q '"ok":true' /tmp/auth_check_result.json 2>/dev/null; then
+                    echo "✅ Auth looks healthy (check passed)"
+                else
+                    echo "⚠️  Auth check failed — you may need to sign in via VNC"
+                    echo "   Open: http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
+                    echo "   Then run: ./tools/open-signin.sh"
+                fi
+            fi
+        }) &
+    fi
+fi
+
 echo ""
 echo "To stop: kill $RELAY_PID"
