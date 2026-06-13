@@ -47,8 +47,8 @@ if ! pgrep -f websockify >/dev/null; then
 fi
 
 # Start the relay
-echo "Starting relay..."
-DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" \
+echo "Starting relay (pool-size: 2)..."
+DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" --pool-size 2 \
     > "$LOG_DIR/relay.log" 2>> "$LOG_DIR/relay.log" &
 RELAY_PID=$!
 echo "Relay PID: $RELAY_PID"

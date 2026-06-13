@@ -18,6 +18,7 @@ function printHelp() {
     '  --port <n>         Relay WS port (default: ' + DEFAULT_PORT + ')',
     '  --ui-port <n>      Chat UI HTTP port (default: 3000)',
     '  --profile <dir>    Browser profile dir (default: ./profile)',
+    '  --pool-size <n>    Pre-warmed page pool (default: 2)',
     '  --headless          Run off-screen (hidden window)',
     '  --no-headless       Show browser window for interactive login',
     '  --interval <min>    Session keepalive refresh (default: ' + DEFAULT_INTERVAL_MINUTES + ')',
@@ -35,6 +36,7 @@ function parseArgs(argv) {
     interval: DEFAULT_INTERVAL_MINUTES,
     noUi: false,
     help: false,
+    poolSize: 2, // default 2 warmed pages for instant connections
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
@@ -44,6 +46,7 @@ function parseArgs(argv) {
       case '--headless': a.headless = true; break;
       case '--no-headless': a.headless = false; break;
       case '--interval': a.interval = parseInt(argv[++i]) || DEFAULT_INTERVAL_MINUTES; break;
+      case '--pool-size': a.poolSize = parseInt(argv[++i]) || 2; break;
       case '--no-ui': a.noUi = true; break;
       case '--help': case '-h': a.help = true; break;
     }
