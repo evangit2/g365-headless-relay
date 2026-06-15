@@ -8,8 +8,12 @@ PROFILE_DIR="$SCRIPT_DIR/profile"
 LOG_DIR="/tmp"
 RELAY_PORT=8765
 UI_PORT=8767
+OPENAI_API_PORT=9000
+OPENAI_API_HOST=0.0.0.0
+MAX_CONCURRENCY=10
 
 export PROFILE_DIR
+export OPENAI_API_PORT OPENAI_API_HOST MAX_CONCURRENCY
 
 cd "$SCRIPT_DIR"
 
@@ -79,18 +83,27 @@ if [[ -f "$SCRIPT_DIR/.env" ]]; then
 fi
 
 # Start the relay
+# Load optional secrets from .env
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+  set -a
+  source "$SCRIPT_DIR/.env"
+  set +a
+fi
+
 echo ""
-echo "Starting relay (pool-size: 5)..."
-DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" --pool-size 5 \
+echo "Starting relay (pool-size: 5, max-concurrency: ${MAX_CONCURRENCY:-10})..."
+DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" --pool-size 1 \
     > "$LOG_DIR/relay.log" 2>> "$LOG_DIR/relay.log" &
 disown
 RELAY_PID=$!
 echo "Relay PID: $RELAY_PID"
 
 echo ""
-echo "Relay WS:    ws://127.0.0.1:$RELAY_PORT"
-echo "Chat UI:     http://127.0.0.1:$UI_PORT"
-echo "VNC remote:  http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
+echo "Relay WS:      ws://127.0.0.1:$RELAY_PORT"
+echo "OpenAI API:    http://${OPENAI_API_HOST:-0.0.0.0}:$OPENAI_API_PORT/v1/chat/completions"
+echo "Chat UI:       http://127.0.0.1:$UI_PORT"
+echo "VNC remote:    http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
 echo ""
 
+echo "Health: curl http://${OPENAI_API_HOST:-0.0.0.0}:$OPENAI_API_PORT/health"
 echo "To stop: kill $RELAY_PID"
