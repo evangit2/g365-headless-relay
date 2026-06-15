@@ -13,6 +13,7 @@ profile/
 
 # Logs
 *.log
+logs/
 /tmp/
 
 # OS
