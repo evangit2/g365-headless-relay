@@ -1,134 +1,72 @@
 # g365-headless-relay
 
-Node.js off-screen Chromium bridge that wraps the M365 Copilot WebSocket (`substrate.office.com`) as a local `ws://127.0.0.1:8765` relay. No access tokens are extracted or cached — the browser's authenticated session handles all auth.
+Node.js off-screen Chromium bridge that wraps the M365 Copilot WebSocket (`substrate.office.com`) as a local `ws://127.0.0.1:8765` relay.
 
-## What's new in this fork
-
-- **Polished chat UI** (`chat-ui/index.html`) — dark-theme, markdown rendering, collapsible reasoning panel, debug console
-- **Real-time reasoning steps** — captures M365 internal reasoning (chain-of-thought, code execution) via `reasoning_delta` events
-- **40Hz polling** — 25ms server-side poll interval for fast streaming
-- **Page pool** — pre-warmed pages for instant connection (no more ~10s wait per client)
-- **WebSocket ping/pong** — prevents idle disconnects (1006 errors)
-- **Duplicate suppression** — dedupes `writeAtCursor` streaming vs `type=2` full messages
-- **Conversation isolation** — each client gets independent session, auto-cleared on connect
-- **VNC/noVNC included** — remote browser viewing via `start.sh` (port 6080)
+No access tokens are extracted or cached — the browser's authenticated session handles all auth.
 
 ## Quick start
 
 ```bash
 npm install
 
-# First time — sign in via visible browser
-node index.js --no-headless
+# Copy example env and fill in your M365 credentials
+cp .env.example .env
+# edit .env
 
-# Normal use — off-screen relay + chat UI + VNC
 ./start.sh
 ```
 
-Relay WS: `ws://127.0.0.1:8765`  
-Chat UI:  `http://127.0.0.1:8767`  
-VNC view: `http://<host>:6080/vnc.html`
+Then open **http://localhost:8767** for the chat UI.
 
-## WebSocket API
+## Authentication
 
-Connect to `ws://127.0.0.1:8765`
+The relay needs a persistent Chromium profile with an authenticated M365 session.
 
-```
-→ {"type":"new","model":"gpt-5.5-think-deeper"}
-← {"type":"ready","model":"gpt-5.5-think-deeper"}
+1. Create `.env` from `.env.example` with your M365 email and password.
+2. Run `./start.sh`.
+3. On first run it will sign in headlessly via `tools/auto-signin.js`.
+4. If Microsoft requires MFA/CAPTCHA, open the printed VNC URL and sign in manually.
 
-→ {"type":"chat","text":"Hello"}
-← {"type":"sent"}
-← {"type":"reasoning_delta","text":"Analyzing the query..."}
-← {"type":"delta","text":"Hel"}
-← {"type":"delta","text":"lo"}
-← {"type":"reasoning_done"}
-← {"type":"done"}
-```
+Profile data is stored in `./profile/` (gitignored). Cookies and session state stay inside the browser.
 
-| Type | Dir | Description |
-|------|-----|-------------|
-| `new` | → | Create session, pick model |
-| `chat` | → | Send a message |
-| `ping` | → | Keepalive |
-| `clear` | → | Reset conversation |
-| `ready` | ← | Session ready |
-| `sent` | ← | Message acknowledged |
-| `reasoning_delta` | ← | Reasoning step chunk |
-| `reasoning_done` | ← | All reasoning complete |
-| `delta` | ← | Streaming answer chunk |
-| `message` | ← | Full bot response (fallback) |
-| `done` | ← | Turn complete |
-| `error` | ← | Error details |
-| `pong` | ← | Ping response |
+## Commands
 
-## Models
+| Command | Description |
+|---------|-------------|
+| `./start.sh` | Start Xvfb + relay + VNC + chat UI; auto-signs in if needed |
+| `node tools/auto-signin.js` | Headless sign-in using `.env` |
+| `node tools/auth-check.js` | Check if profile is authenticated |
+| `./tools/open-signin.sh` | Open visible Chrome on VNC for manual sign-in |
+| `node test-e2e.js` | Quick end-to-end test |
 
-| Model ID | Substrate Tone | Behavior |
-|----------|---------------|----------|
-| `gpt-5.5-think-deeper` | `Gpt_5_5_Reasoning` | Deeper reasoning, visible steps |
-| `gpt-5.5-quick` | `Gpt_5_5_Chat` | Fast, concise |
+## Relay protocol
 
-## Architecture
+Connect to `ws://127.0.0.1:8765`:
 
 ```
-Client WS          Relay Server        Browser Page        Substrate WS
-─────────          ────────────        ────────────        ────────────
-ws://localhost     lib/server.js       lib/bridge.js       substrate.office.com
-─────→              ─────→              ─────→              ─────→
-  {type:"chat"}      page.evaluate       __m365Send()        buildChatInvoke()
-                    (bridge call)        (injected JS)       (SignalR type:4)
-                   ←─────              ←─────              ←─────
-  {type:"delta"}     poll loop           __m365Poll()        type:1 update
-                     setInterval 25ms
+→ { "type": "new", "model": "gpt-5.5-think-deeper" }
+← { "type": "ready", "model": "gpt-5.5-think-deeper" }
+
+→ { "type": "chat", "text": "Hello" }
+← { "type": "delta", "text": "Hel" }
+← { "type": "delta", "text": "lo" }
+← { "type": "done" }
 ```
 
-```
-                    Browser (Playwright)
-                    ──────────────────
-                    lib/browser.js
-                    │
-                    ├─ launchPersistentContext(profile/)  ← headed always
-                    ├─ inject lib/bridge.js via addInitScript
-                    ├─ page pool (pre-warmed)
-                    └─ one page per client connection
-```
+## Project layout
 
-### Files
+- `index.js` — CLI entrypoint
+- `lib/browser.js` — Playwright Chromium launcher
+- `lib/bridge.js` — Injected page script that talks to M365 substrate
+- `lib/server.js` — WebSocket relay server
+- `lib/ui-server.js` — Chat UI Express server
+- `tools/auto-signin.js` — Headless M365 sign-in helper
+- `tools/auth-check.js` — Auth health check
+- `tools/open-signin.sh` — Manual sign-in helper
+- `chat-ui/index.html` — Dark-themed web chat UI
 
-| File | Role |
-|------|------|
-| `index.js` | CLI parsing, browser launch, server orchestration |
-| `lib/browser.js` | Playwright Chromium launcher — headed always, off-screen positioning |
-| `lib/bridge.js` | Injected page script — intercepts WS constructor, handles substrate protocol, dedupes deltas, extracts reasoning |
-| `lib/server.js` | External WebSocket server — page pool, 40Hz polling, ping/pong, conversation reset |
-| `lib/ui-server.js` | Static HTTP server for `chat-ui/index.html` |
-| `chat-ui/index.html` | Dark-theme chat interface with reasoning panel, markdown, debug console |
-| `start.sh` | Off-screen relay + Xvfb + x11vnc + noVNC |
+## Security notes
 
-## Substrate Protocol
-
-- **Separator:** `\x1e` (ASCII 0x1E)
-- **Handshake:** `{"protocol":"json","version":1}\x1e`
-- **Chat invoke (type:4):** Contains `tone` (model), `optionsSets`, `message.text`, `isStartOfSession`
-- **Response types:**
-  - `type:1 target:update` → `writeAtCursor` (streaming chars) or `messages[]` (reasoning + full text)
-  - `type:2` → `item.messages[]` (full conversation)
-  - `type:3` → Completion
-  - `type:6` → Ping (ignored)
-
-## Key Behaviors
-
-- **No token extraction** — access token stays in browser; bridge uses page's own substrate WS URL template
-- **Browser always headed** — off-screen positioning for hidden mode. True headless breaks M365 OAuth.
-- **One page per client** — each WS connection gets its own tab
-- **Page pool** — pages warmed ahead of time for instant connections
-- **Poll interval: 25ms** — fast delta delivery to client
-- **Anti-detection:** `--disable-blink-features=AutomationControlled`, real Chrome user-agent
-
-## Credits
-
-Original by [notBlubbll](https://github.com/notBlubbll/g365-headless-relay).  
-Forked and enhanced by [evangit2](https://github.com/evangit2) with chat UI, reasoning extraction, page pool, and reliability fixes.
-
-Inspired by [m365-copilot-openai-proxy](https://github.com/kuchris/m365-copilot-openai-proxy) by [@kuchris](https://github.com/kuchris).
+- `.env` and `profile/` are gitignored. Never commit them.
+- The bridge does not extract access tokens; it uses the browser's own cookies.
+- For headless sign-in, your credentials are only read from `.env` at runtime.

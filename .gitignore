@@ -5,6 +5,9 @@ package-lock.json
 # Auth profile (contains cookies & credentials)
 profile/
 
+# Secrets
+.env
+
 # Backups
 *.bak
 

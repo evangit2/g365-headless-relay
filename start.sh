@@ -1,12 +1,15 @@
 #!/bin/bash
 # G365 Copilot Relay - Start script
 # Starts Xvfb + relay + x11vnc + noVNC
+# If .env has M365_EMAIL/M365_PASSWORD and auth is missing, auto-signs in first.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROFILE_DIR="$SCRIPT_DIR/profile"
 LOG_DIR="/tmp"
 RELAY_PORT=8765
 UI_PORT=8767
+
+export PROFILE_DIR
 
 cd "$SCRIPT_DIR"
 
@@ -46,10 +49,41 @@ if ! pgrep -f websockify >/dev/null; then
         > "$LOG_DIR/novnc.log" 2>&1 &
 fi
 
+# Auto-sign-in if .env exists and auth check fails
+if [[ -f "$SCRIPT_DIR/.env" ]]; then
+    echo ""
+    echo "Checking auth (auto-signin enabled via .env)..."
+    # Quick check: launch a page and see if it hits login
+    export DISPLAY=:99
+    set +e
+    node tools/auth-check.js --quiet >/dev/null 2>&1
+    AUTH_OK=$?
+    set -e
+    if [[ $AUTH_OK -ne 0 ]]; then
+        echo "Auth missing or expired — running auto-signin..."
+        set +e
+        node tools/auto-signin.js
+        SIGNIN_OK=$?
+        set -e
+        if [[ $SIGNIN_OK -ne 0 ]]; then
+            echo ""
+            echo "❌ Auto-signin failed (exit $SIGNIN_OK)."
+            echo "   VNC remote: http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
+            echo "   Manual fallback: ./tools/open-signin.sh"
+            exit 1
+        fi
+        echo "✅ Auto-signin succeeded"
+    else
+        echo "✅ Auth healthy"
+    fi
+fi
+
 # Start the relay
-echo "Starting relay (pool-size: 2)..."
-DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" --pool-size 2 \
+echo ""
+echo "Starting relay (pool-size: 5)..."
+DISPLAY=:99 node index.js --headless --ui-port "$UI_PORT" --pool-size 5 \
     > "$LOG_DIR/relay.log" 2>> "$LOG_DIR/relay.log" &
+disown
 RELAY_PID=$!
 echo "Relay PID: $RELAY_PID"
 
@@ -59,27 +93,4 @@ echo "Chat UI:     http://127.0.0.1:$UI_PORT"
 echo "VNC remote:  http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
 echo ""
 
-# Quick auth check after a few seconds
-sleep 3
-echo ""
-echo "Checking auth status (wait ~10s)..."
-if command -v node >/dev/null 2>&1; then
-    # Try running auth-check.js if node_modules exist
-    if [[ -d "$SCRIPT_DIR/node_modules" ]]; then
-        (sleep 5 && node "$SCRIPT_DIR/tools/auth-check.js" --json > /tmp/auth_check_result.json 2>/dev/null) &
-        (sleep 12 && {
-            if [[ -f /tmp/auth_check_result.json ]]; then
-                if grep -q '"ok":true' /tmp/auth_check_result.json 2>/dev/null; then
-                    echo "✅ Auth looks healthy (check passed)"
-                else
-                    echo "⚠️  Auth check failed — you may need to sign in via VNC"
-                    echo "   Open: http://$(hostname -I | awk '{print $1}'):6080/vnc.html"
-                    echo "   Then run: ./tools/open-signin.sh"
-                fi
-            fi
-        }) &
-    fi
-fi
-
-echo ""
 echo "To stop: kill $RELAY_PID"

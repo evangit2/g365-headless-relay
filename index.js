@@ -36,7 +36,7 @@ function parseArgs(argv) {
     interval: DEFAULT_INTERVAL_MINUTES,
     noUi: false,
     help: false,
-    poolSize: 2, // default 2 warmed pages for instant connections
+    poolSize: 5, // default 5 warmed pages for instant connections
   };
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
